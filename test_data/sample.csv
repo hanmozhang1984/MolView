@@ -1,0 +1,11 @@
+Name,SMILES,Activity
+Aspirin,CC(=O)OC1=CC=CC=C1C(O)=O,4.5
+Caffeine,CN1C=NC2=C1C(=O)N(C)C(=O)N2C,3.2
+Ibuprofen,CC(C)CC1=CC=C(C=C1)C(C)C(O)=O,5.1
+Acetaminophen,CC(=O)NC1=CC=C(O)C=C1,2.8
+Naproxen,COC1=CC2=CC(=CC2=CC1)C(C)C(O)=O,4.9
+Diclofenac,OC(=O)CC1=CC=CC=C1NC1=C(Cl)C=CC=C1Cl,6.2
+Metformin,CN(C)C(=N)NC(=N)N,1.1
+Omeprazole,COC1=CC2=C(C=C1C)NC(=N2)S(=O)CC1=NC=C(C)C(OC)=C1C,3.7
+Atorvastatin,CC(C)C1=C(C(=O)NC2=CC=CC=C2)C(=C(N1CCC(CC(O)=O)O)C1=CC=C(F)C=C1)C1=CC=CC=C1,7.8
+Metoprolol,COCCc1ccc(OCC(O)CNC(C)C)cc1,2.4

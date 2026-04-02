@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ketcher Editor</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #root { width: 100%; height: 100%; overflow: hidden; }
+  </style>
+  <script>
+    // Polyfills for Node.js globals used by some dependencies
+    if (typeof global === "undefined") { window.global = window; }
+    if (typeof process === "undefined") { window.process = { env: {} }; }
+  </script>
+  <script type="module" crossorigin src="./assets/index-2RjAuMso.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/lodash-K0Nyn06M.js">
+  <link rel="stylesheet" crossorigin href="./assets/index-DW-y-9zh.css">
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    // Bridge for QWebEngineView: use document.title for async results
+    window._lastResult = "";
+
+    window.fetchSmiles = function() {
+      if (!window.ketcher) { document.title = ""; return; }
+      window.ketcher.getSmiles().then(function(s) {
+        window._lastResult = s || "";
+        document.title = "SMILES:" + window._lastResult;
+      }).catch(function() {
+        window._lastResult = "";
+        document.title = "SMILES:";
+      });
+    };
+
+    window.injectMolecule = function(smiles) {
+      if (!window.ketcher) return;
+      window.ketcher.setMolecule(smiles).catch(function() {});
+    };
+
+    window.clearMolecule = function() {
+      if (!window.ketcher) return;
+      window.ketcher.setMolecule("").catch(function() {});
+    };
+
+    window.isReady = function() {
+      return window.ketcherReady === true;
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "molview"
+version = "0.1.0"
+description = "Desktop cheminformatics data analysis application"
+requires-python = ">=3.9"
+dependencies = [
+    "PySide6>=6.5",
+    "pandas>=2.0",
+    "numpy",
+    "matplotlib",
+    "scipy",
+    "openpyxl",
+    "rdkit",
+]
+
+[project.scripts]
+molview = "molview.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
