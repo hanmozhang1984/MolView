@@ -307,6 +307,7 @@ class DataTableView(QTableView):
     # ── Row heights ──
 
     def _adjust_row_heights(self):
+        from molview.gui.table.delegates import get_structure_row_height
         has_smiles = False
         for col in range(self._dataset.column_count):
             col_name = self._dataset.column_name(col)
@@ -315,7 +316,7 @@ class DataTableView(QTableView):
                 has_smiles = True
                 break
         if has_smiles:
-            self.verticalHeader().setDefaultSectionSize(100)
+            self.verticalHeader().setDefaultSectionSize(get_structure_row_height())
         else:
             self.verticalHeader().setDefaultSectionSize(30)
 

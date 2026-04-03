@@ -6,6 +6,32 @@ from rdkit import Chem, DataStructs
 from rdkit.Chem import AllChem, rdFingerprintGenerator
 
 
+def exact_match_search(smiles_series: pd.Series, query_smiles: str,
+                       progress_callback=None) -> list[bool]:
+    """Return a boolean mask: True for rows whose canonical SMILES matches the query exactly."""
+    query_mol = Chem.MolFromSmiles(query_smiles)
+    if query_mol is None:
+        return [False] * len(smiles_series)
+    canonical_query = Chem.MolToSmiles(query_mol)
+
+    results = []
+    total = len(smiles_series)
+    for i, smiles in enumerate(smiles_series):
+        if pd.notna(smiles) and str(smiles).strip():
+            mol = Chem.MolFromSmiles(str(smiles))
+            if mol is not None:
+                results.append(Chem.MolToSmiles(mol) == canonical_query)
+            else:
+                results.append(False)
+        else:
+            results.append(False)
+
+        if progress_callback and (i + 1) % 100 == 0:
+            progress_callback(int((i + 1) / total * 100))
+
+    return results
+
+
 def substructure_search(smiles_series: pd.Series, query_smarts: str,
                         progress_callback=None) -> list[bool]:
     """Return a boolean mask: True for rows whose molecule contains the query substructure.

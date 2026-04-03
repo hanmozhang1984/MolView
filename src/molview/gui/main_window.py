@@ -67,6 +67,12 @@ class MainWindow(QMainWindow):
         if state:
             self.restoreState(state)
 
+        # Restore structure size preference
+        saved_size = self._settings.value("structureSize", "Medium")
+        if saved_size:
+            from molview.gui.table.delegates import set_structure_size
+            set_structure_size(saved_size)
+
         # Defer Ketcher preload to after event loop starts (avoids QWebEngineView
         # interfering with widget events during initial layout on macOS)
         from PySide6.QtCore import QTimer
@@ -79,75 +85,9 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
     def _apply_global_style(self):
-        self.setStyleSheet("""
-            QMenuBar {
-                background: #e8e8e8;
-                border-bottom: 1px solid #ccc;
-                padding: 2px 0px;
-            }
-            QMenuBar::item {
-                padding: 4px 10px;
-                border-radius: 4px;
-            }
-            QMenuBar::item:selected {
-                background: #d0d8e8;
-            }
-            QMenu {
-                padding: 4px 0px;
-            }
-            QMenu::item {
-                padding: 5px 28px 5px 20px;
-            }
-            QMenu::item:selected {
-                background: #d0d8e8;
-            }
-            QMenu::separator {
-                height: 1px;
-                background: #d0d0d0;
-                margin: 3px 8px;
-            }
-            QToolBar {
-                background: #f0f0f0;
-                border-bottom: 1px solid #ccc;
-                spacing: 3px;
-                padding: 2px 6px;
-            }
-            QToolButton {
-                background: transparent;
-                border: 1px solid transparent;
-                border-radius: 4px;
-                padding: 4px 8px;
-            }
-            QToolButton:hover {
-                background: #dde4ee;
-                border: 1px solid #b0b8c8;
-            }
-            QToolButton:pressed {
-                background: #c0cade;
-            }
-            QToolBar::separator {
-                width: 1px;
-                background: #c8c8c8;
-                margin: 3px 4px;
-            }
-            QStatusBar {
-                background: #f0f0f0;
-                border-top: 1px solid #ccc;
-            }
-            QTableView {
-                gridline-color: #ddd;
-                selection-background-color: #ccdcf0;
-                selection-color: #000;
-            }
-            QHeaderView::section {
-                background: #e8e8e8;
-                border: none;
-                border-right: 1px solid #ccc;
-                border-bottom: 1px solid #ccc;
-                padding: 4px 4px;
-                text-align: center;
-            }
-        """)
+        from molview.gui.themes import LIGHT_STYLE, DARK_STYLE
+        self._dark_mode = self._settings.value("darkMode", False, type=bool)
+        self.setStyleSheet(DARK_STYLE if self._dark_mode else LIGHT_STYLE)
 
     def _setup_ui(self):
         from PySide6.QtWidgets import QVBoxLayout, QWidget
@@ -344,6 +284,28 @@ class MainWindow(QMainWindow):
         reset_widths_action.triggered.connect(self._table_view.reset_column_widths)
         view_menu.addAction(reset_widths_action)
 
+        view_menu.addSeparator()
+
+        # Dark mode toggle
+        self._dark_mode_action = QAction("Dark Mode", self)
+        self._dark_mode_action.setCheckable(True)
+        self._dark_mode_action.setChecked(self._dark_mode)
+        self._dark_mode_action.triggered.connect(self._toggle_dark_mode)
+        view_menu.addAction(self._dark_mode_action)
+
+        # Structure size submenu
+        size_menu = view_menu.addMenu("Structure Image Size")
+        from molview.gui.table.delegates import STRUCTURE_SIZES, get_structure_size
+        self._size_actions = {}
+        for size_name in STRUCTURE_SIZES:
+            action = size_menu.addAction(size_name)
+            action.setCheckable(True)
+            action.setChecked(size_name == get_structure_size())
+            action.triggered.connect(
+                lambda checked, s=size_name: self._set_structure_size(s)
+            )
+            self._size_actions[size_name] = action
+
         # ── Chemistry ──
         chem_menu = menubar.addMenu("&Chemistry")
 
@@ -359,10 +321,38 @@ class MainWindow(QMainWindow):
 
         chem_menu.addSeparator()
 
+        rgroup_action = QAction("R-Group Decomposition...", self)
+        rgroup_action.triggered.connect(self._rgroup_decomposition)
+        chem_menu.addAction(rgroup_action)
+
+        mmp_action = QAction("Matched Molecular Pairs...", self)
+        mmp_action.triggered.connect(self._mmp_analysis)
+        chem_menu.addAction(mmp_action)
+
+        chem_menu.addSeparator()
+
+        custom_col_action = QAction("Custom Calculated Column...", self)
+        custom_col_action.triggered.connect(self._custom_column)
+        chem_menu.addAction(custom_col_action)
+
+        pubchem_action = QAction("PubChem Lookup...", self)
+        pubchem_action.triggered.connect(self._pubchem_lookup)
+        chem_menu.addAction(pubchem_action)
+
+        chem_menu.addSeparator()
+
         clear_search_action = QAction("Clear Search (Show All)", self)
         clear_search_action.setShortcut(QKeySequence("Escape"))
         clear_search_action.triggered.connect(self._clear_search)
         chem_menu.addAction(clear_search_action)
+
+        # ── Help ──
+        help_menu = menubar.addMenu("&Help")
+
+        shortcuts_action = QAction("Keyboard Shortcuts...", self)
+        shortcuts_action.setShortcut(QKeySequence("Ctrl+/"))
+        shortcuts_action.triggered.connect(self._show_shortcuts)
+        help_menu.addAction(shortcuts_action)
 
     def _setup_toolbar(self):
         toolbar = QToolBar("Main Toolbar")
@@ -499,6 +489,32 @@ class MainWindow(QMainWindow):
         self._dataset.show_all_rows()
         self._dataset.clear_selection()
         self._dataset.data_changed.emit()
+
+    # ── Undo/redo ──
+
+    # ── Theme and appearance ──
+
+    def _toggle_dark_mode(self, checked: bool):
+        self._dark_mode = checked
+        self._settings.setValue("darkMode", checked)
+        from molview.gui.themes import LIGHT_STYLE, DARK_STYLE
+        self.setStyleSheet(DARK_STYLE if checked else LIGHT_STYLE)
+
+    def _set_structure_size(self, size_name: str):
+        from molview.gui.table.delegates import set_structure_size
+        set_structure_size(size_name)
+        self._settings.setValue("structureSize", size_name)
+        # Update checkmarks
+        for name, action in self._size_actions.items():
+            action.setChecked(name == size_name)
+        # Refresh table row heights and repaint
+        self._table_view._adjust_row_heights()
+        self._dataset.data_changed.emit()
+
+    def _show_shortcuts(self):
+        from molview.gui.dialogs.shortcuts_dialog import ShortcutsDialog
+        dlg = ShortcutsDialog(self)
+        dlg.exec()
 
     # ── Undo/redo ──
 
@@ -757,6 +773,38 @@ class MainWindow(QMainWindow):
         self._search_dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self._search_dlg.setModal(True)
         self._search_dlg.show()
+
+    def _rgroup_decomposition(self):
+        if self._dataset.is_empty():
+            QMessageBox.information(self, "Info", "Load a file first.")
+            return
+        from molview.gui.dialogs.rgroup_dialog import RGroupDialog
+        # Use show() — the dialog may open Ketcher
+        self._rgroup_dlg = RGroupDialog(self._dataset, self)
+        self._rgroup_dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._rgroup_dlg.setModal(True)
+        self._rgroup_dlg.show()
+
+    def _mmp_analysis(self):
+        if self._dataset.is_empty():
+            QMessageBox.information(self, "Info", "Load a file first.")
+            return
+        from molview.gui.dialogs.mmp_dialog import MMPDialog
+        dlg = MMPDialog(self._dataset, self)
+        dlg.exec()
+
+    def _custom_column(self):
+        if self._dataset.is_empty():
+            QMessageBox.information(self, "Info", "Load a file first.")
+            return
+        from molview.gui.dialogs.custom_column_dialog import CustomColumnDialog
+        dlg = CustomColumnDialog(self._dataset, self)
+        dlg.exec()
+
+    def _pubchem_lookup(self):
+        from molview.gui.dialogs.lookup_dialog import LookupDialog
+        dlg = LookupDialog(self._dataset, self)
+        dlg.exec()
 
     # ── Drag and drop ──
 

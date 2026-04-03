@@ -9,7 +9,36 @@ from PySide6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem
 
 from molview.gui.table.table_model import SMILES_ROLE
 
-STRUCTURE_CELL_SIZE = QSize(150, 100)
+# Structure size presets: (cell_width, cell_height, row_height)
+STRUCTURE_SIZES = {
+    "Small": (100, 70, 75),
+    "Medium": (150, 100, 105),
+    "Large": (200, 140, 145),
+}
+
+# Current setting (module-level, shared across delegates)
+_current_size = "Medium"
+
+
+def get_structure_size() -> str:
+    return _current_size
+
+
+def set_structure_size(size: str):
+    global _current_size
+    if size in STRUCTURE_SIZES:
+        _current_size = size
+        _smiles_to_pixmap.cache_clear()
+
+
+def get_structure_cell_size() -> QSize:
+    w, h, _ = STRUCTURE_SIZES[_current_size]
+    return QSize(w, h)
+
+
+def get_structure_row_height() -> int:
+    _, _, rh = STRUCTURE_SIZES[_current_size]
+    return rh
 
 
 @lru_cache(maxsize=2000)
@@ -42,7 +71,7 @@ class StructureDelegate(QStyledItemDelegate):
             rect: QRect = option.rect
             pixmap = _smiles_to_pixmap(smiles, rect.width(), rect.height())
             if pixmap is not None:
-                # Draw white background
+                # Always use white background for structures (even in dark mode)
                 painter.fillRect(rect, Qt.GlobalColor.white)
                 # Center the pixmap
                 scaled = pixmap.scaled(
@@ -59,5 +88,5 @@ class StructureDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
         smiles = index.data(SMILES_ROLE)
         if smiles:
-            return STRUCTURE_CELL_SIZE
+            return get_structure_cell_size()
         return super().sizeHint(option, index)

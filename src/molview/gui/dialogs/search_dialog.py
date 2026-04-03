@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 
 from molview.models.dataset import DataSet
 from molview.models.column_schema import ColumnType, ColumnSchema
-from molview.chem.search import substructure_search, similarity_search
+from molview.chem.search import substructure_search, similarity_search, exact_match_search
 
 
 class SearchWorker(QThread):
@@ -27,7 +27,10 @@ class SearchWorker(QThread):
 
     def run(self):
         try:
-            if self._type == "substructure":
+            if self._type == "exact":
+                result = exact_match_search(self._smiles, self._query, self.progress.emit)
+                self.finished_sub.emit(result)
+            elif self._type == "substructure":
                 result = substructure_search(self._smiles, self._query, self.progress.emit)
                 self.finished_sub.emit(result)
             else:
@@ -90,12 +93,15 @@ class SearchDialog(QDialog):
 
         # Search type
         type_layout = QHBoxLayout()
+        self._exact_radio = QRadioButton("Exact Match")
         self._sub_radio = QRadioButton("Substructure")
         self._sub_radio.setChecked(True)
         self._sim_radio = QRadioButton("Similarity")
         type_group = QButtonGroup(self)
+        type_group.addButton(self._exact_radio)
         type_group.addButton(self._sub_radio)
         type_group.addButton(self._sim_radio)
+        type_layout.addWidget(self._exact_radio)
         type_layout.addWidget(self._sub_radio)
         type_layout.addWidget(self._sim_radio)
 
@@ -172,7 +178,12 @@ class SearchDialog(QDialog):
         self._progress.setValue(0)
         self._buttons.setEnabled(False)
 
-        search_type = "substructure" if self._sub_radio.isChecked() else "similarity"
+        if self._exact_radio.isChecked():
+            search_type = "exact"
+        elif self._sub_radio.isChecked():
+            search_type = "substructure"
+        else:
+            search_type = "similarity"
         smiles_series = self._dataset.df[col_name]
 
         self._worker = SearchWorker(
