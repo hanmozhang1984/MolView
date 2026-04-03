@@ -8,13 +8,19 @@ def main():
     from rdkit import RDLogger
     RDLogger.logger().setLevel(RDLogger.ERROR)
 
+    from pathlib import Path
     from PySide6.QtWidgets import QApplication
-    from PySide6.QtGui import QFont, QFontDatabase
+    from PySide6.QtGui import QFont, QFontDatabase, QIcon
 
     app = QApplication(sys.argv)
     app.setApplicationName("MolView")
     app.setOrganizationName("MolView")
     app.setStyle("Fusion")
+
+    # App icon (shown in dock, window title bar, task switcher)
+    icon_path = Path(__file__).parent / "gui" / "molview_icon.png"
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
 
     # Global font: Aptos if available, else Helvetica Neue (macOS), else system default
     available = set(QFontDatabase.families())
