@@ -133,6 +133,11 @@ class MainWindow(QMainWindow):
         # ── File ──
         file_menu = menubar.addMenu("&File")
 
+        new_action = QAction("&New", self)
+        new_action.setShortcut(QKeySequence("Ctrl+N"))
+        new_action.triggered.connect(self._new_file)
+        file_menu.addAction(new_action)
+
         open_action = QAction("&Open...", self)
         open_action.setShortcut(QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self._open_file)
@@ -556,6 +561,29 @@ class MainWindow(QMainWindow):
         self._rebuild_recent_menu()
 
     # ── File I/O ──
+
+    def _new_file(self):
+        """Clear current dataset to start fresh."""
+        if self._dataset.modified:
+            reply = QMessageBox.question(
+                self, "Unsaved Changes",
+                "You have unsaved changes. Save before clearing?",
+                QMessageBox.StandardButton.Save |
+                QMessageBox.StandardButton.Discard |
+                QMessageBox.StandardButton.Cancel
+            )
+            if reply == QMessageBox.StandardButton.Save:
+                self._save_file()
+            elif reply == QMessageBox.StandardButton.Cancel:
+                return
+
+        import pandas as pd
+        self._dataset.load_dataframe(pd.DataFrame(), None)
+        self._dataset.file_path = None
+        self._dataset.modified = False
+        self._undo_stack.clear()
+        self.setWindowTitle("MolView")
+        self._update_status()
 
     def _open_file(self):
         path, _ = QFileDialog.getOpenFileName(

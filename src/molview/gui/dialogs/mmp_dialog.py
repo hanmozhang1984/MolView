@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QProgressBar, QGroupBox, QMessageBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QSpinBox,
     QSplitter, QFrame, QWidget, QListWidget, QAbstractItemView,
+    QFileDialog, QPushButton,
 )
 
 from molview.models.dataset import DataSet
@@ -33,6 +34,19 @@ def _smiles_to_pixmap(smiles: str, width: int = 250, height: int = 180) -> QPixm
         return QPixmap.fromImage(qimg)
     except Exception:
         return None
+
+
+_thumb_cache: dict[str, QPixmap | None] = {}
+
+
+def _smiles_to_thumb(smiles: str, width: int = 120, height: int = 80) -> QPixmap | None:
+    """Render a small thumbnail for table cells, with caching."""
+    key = f"{smiles}|{width}x{height}"
+    if key in _thumb_cache:
+        return _thumb_cache[key]
+    px = _smiles_to_pixmap(smiles, width, height)
+    _thumb_cache[key] = px
+    return px
 
 
 class _StructureLabel(QLabel):
@@ -161,7 +175,8 @@ class MMPDialog(QDialog):
         self._min_ctx_spin = QSpinBox()
         self._min_ctx_spin.setRange(1, 30)
         self._min_ctx_spin.setValue(6)
-        self._min_ctx_spin.setToolTip("Minimum heavy atoms in the shared scaffold. "
+        self._min_ctx_spin.setToolTip("Minimum heavy atoms (non-hydrogen) in the shared scaffold. "
+                                       "Hydrogen atoms are not counted. "
                                        "Increase to require larger common cores.")
         row3.addWidget(self._min_ctx_spin)
 
@@ -277,10 +292,16 @@ class MMPDialog(QDialog):
         self._run_btn.button(QDialogButtonBox.StandardButton.Ok).setText("Run Analysis")
         self._run_btn.accepted.connect(self._run)
 
+        self._export_btn = QPushButton("Export Results...")
+        self._export_btn.setEnabled(False)
+        self._export_btn.clicked.connect(self._export_results)
+
         self._close_btn = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         self._close_btn.rejected.connect(self.reject)
 
         btn_layout.addWidget(self._run_btn)
+        btn_layout.addWidget(self._export_btn)
+        btn_layout.addStretch()
         btn_layout.addWidget(self._close_btn)
         layout.addLayout(btn_layout)
 
@@ -328,6 +349,7 @@ class MMPDialog(QDialog):
 
         self._result_df = result
         self._splitter.setVisible(True)
+        self._export_btn.setEnabled(True)
 
         # Detect ID column
         self._id_col = None
@@ -350,43 +372,56 @@ class MMPDialog(QDialog):
         )
 
         # Build table headers and a mapping to result data
-        # Each entry: (header_label, extractor_func)
+        # Each entry: (header_label, extractor_func, is_structure)
         self._table_columns = []
+        # Track which columns are structure columns (rendered as images)
+        self._structure_col_indices = set()
 
         if self._id_col:
-            self._table_columns.append(('Compound A', lambda r: self._get_id(r, 'Mol_A_idx')))
-            self._table_columns.append(('Compound B', lambda r: self._get_id(r, 'Mol_B_idx')))
+            self._table_columns.append(('Compound A', lambda r: self._get_id(r, 'Mol_A_idx'), False))
+            self._table_columns.append(('Compound B', lambda r: self._get_id(r, 'Mol_B_idx'), False))
 
-        self._table_columns.append(('R_A', lambda r: str(r['R_A'])))
-        self._table_columns.append(('R_B', lambda r: str(r['R_B'])))
+        self._table_columns.append(('Scaffold', lambda r: str(r['Context']), True))
+        self._table_columns.append(('R_A', lambda r: str(r['R_A']), True))
+        self._table_columns.append(('R_B', lambda r: str(r['R_B']), True))
 
         if 'Delta' in result.columns:
             prop_name = self._prop_combo.currentText()
             self._table_columns.append((
                 f'{prop_name}_A',
-                lambda r: self._fmt_num(r.get('Property_A'))
+                lambda r: self._fmt_num(r.get('Property_A')),
+                False,
             ))
             self._table_columns.append((
                 f'{prop_name}_B',
-                lambda r: self._fmt_num(r.get('Property_B'))
+                lambda r: self._fmt_num(r.get('Property_B')),
+                False,
             ))
             self._table_columns.append((
                 f'\u0394 {prop_name}',
-                lambda r: self._fmt_num(r.get('Delta'))
+                lambda r: self._fmt_num(r.get('Delta')),
+                False,
             ))
 
         for base in data_col_names:
             self._table_columns.append((
                 f'{base}_A',
-                lambda r, b=base: self._fmt_val(r.get(f'{b}_A'))
+                lambda r, b=base: self._fmt_val(r.get(f'{b}_A')),
+                False,
             ))
             self._table_columns.append((
                 f'{base}_B',
-                lambda r, b=base: self._fmt_val(r.get(f'{b}_B'))
+                lambda r, b=base: self._fmt_val(r.get(f'{b}_B')),
+                False,
             ))
 
+        # Record structure column indices
+        for col_idx, (_, _, is_struct) in enumerate(self._table_columns):
+            if is_struct:
+                self._structure_col_indices.add(col_idx)
+
         # Populate table
-        headers = [h for h, _ in self._table_columns]
+        headers = [h for h, _, _ in self._table_columns]
         n_display = min(len(result), 1000)
 
         # Disable sorting while populating
@@ -395,21 +430,42 @@ class MMPDialog(QDialog):
         self._results_table.setHorizontalHeaderLabels(headers)
         self._results_table.setRowCount(n_display)
 
+        thumb_w, thumb_h = 120, 80
+
         for row_idx in range(n_display):
             pair = result.iloc[row_idx]
-            for col_idx, (_, extractor) in enumerate(self._table_columns):
+            for col_idx, (_, extractor, is_struct) in enumerate(self._table_columns):
                 text = extractor(pair)
                 item = QTableWidgetItem()
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                # Store numeric value for proper sorting
-                try:
-                    num = float(text)
-                    item.setData(Qt.ItemDataRole.DisplayRole, text)
-                    item.setData(Qt.ItemDataRole.UserRole, num)
-                except (ValueError, TypeError):
-                    item.setData(Qt.ItemDataRole.DisplayRole, text)
+
+                if is_struct:
+                    # Render structure thumbnail; store SMILES in UserRole for lookup
                     item.setData(Qt.ItemDataRole.UserRole, text)
+                    item.setData(Qt.ItemDataRole.DisplayRole, "")
+                    self._results_table.setItem(row_idx, col_idx, item)
+                    px = _smiles_to_thumb(text, thumb_w, thumb_h)
+                    if px:
+                        lbl = QLabel()
+                        lbl.setPixmap(px)
+                        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                        lbl.setStyleSheet("background: transparent;")
+                        self._results_table.setCellWidget(row_idx, col_idx, lbl)
+                    continue
+                else:
+                    # Store numeric value for proper sorting
+                    try:
+                        num = float(text)
+                        item.setData(Qt.ItemDataRole.DisplayRole, text)
+                        item.setData(Qt.ItemDataRole.UserRole, num)
+                    except (ValueError, TypeError):
+                        item.setData(Qt.ItemDataRole.DisplayRole, text)
+                        item.setData(Qt.ItemDataRole.UserRole, text)
                 self._results_table.setItem(row_idx, col_idx, item)
+
+        # Set row heights to accommodate thumbnails
+        for row_idx in range(n_display):
+            self._results_table.setRowHeight(row_idx, thumb_h + 4)
 
         # Enable sorting by clicking headers
         self._results_table.setSortingEnabled(True)
@@ -454,9 +510,9 @@ class MMPDialog(QDialog):
         # Actually, let's store the result index in each row's first item's UserRole+1
         # Better approach: read the compound IDs from the visible row and find the pair
 
-        # Find the result row by matching R_A and R_B text from visible table cells
-        r_a_col = next((i for i, (h, _) in enumerate(self._table_columns) if h == 'R_A'), None)
-        r_b_col = next((i for i, (h, _) in enumerate(self._table_columns) if h == 'R_B'), None)
+        # Find the result row by matching R_A and R_B SMILES from UserRole data
+        r_a_col = next((i for i, (h, _, _) in enumerate(self._table_columns) if h == 'R_A'), None)
+        r_b_col = next((i for i, (h, _, _) in enumerate(self._table_columns) if h == 'R_B'), None)
         if r_a_col is None or r_b_col is None:
             return
         r_a_item = self._results_table.item(row, r_a_col)
@@ -464,8 +520,10 @@ class MMPDialog(QDialog):
         if not r_a_item or not r_b_item:
             return
 
-        r_a_text = r_a_item.text()
-        r_b_text = r_b_item.text()
+        r_a_text = r_a_item.data(Qt.ItemDataRole.UserRole)
+        r_b_text = r_b_item.data(Qt.ItemDataRole.UserRole)
+        if not r_a_text or not r_b_text:
+            return
 
         # Find matching pair in result_df
         match = self._result_df[
@@ -513,6 +571,52 @@ class MMPDialog(QDialog):
             self._delta_label.setText(f"\u0394 {prop_name}\n{sign}{delta:.3f}")
         else:
             self._delta_label.setText("")
+
+    def _export_results(self):
+        """Export MMP results to CSV or SDF."""
+        if self._result_df is None or self._result_df.empty:
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export MMP Results", "",
+            "CSV Files (*.csv);;SDF Files (*.sdf)"
+        )
+        if not path:
+            return
+
+        try:
+            from pathlib import Path
+            ext = Path(path).suffix.lower()
+
+            # Build an export DataFrame with readable column names
+            export_df = self._result_df.copy()
+
+            # Add compound IDs if available
+            if self._id_col:
+                export_df['Compound_A'] = export_df['Mol_A_idx'].apply(
+                    lambda idx: str(self._dataset.df.iloc[int(idx)][self._id_col])
+                    if int(idx) < len(self._dataset.df) else str(idx)
+                )
+                export_df['Compound_B'] = export_df['Mol_B_idx'].apply(
+                    lambda idx: str(self._dataset.df.iloc[int(idx)][self._id_col])
+                    if int(idx) < len(self._dataset.df) else str(idx)
+                )
+
+            if ext == ".csv":
+                export_df.to_csv(path, index=False)
+            elif ext == ".sdf":
+                from molview.io.sdf_handler import save_sdf
+                # Use Mol_A as the primary SMILES column for SDF export
+                save_sdf(path, export_df, smiles_col='Mol_A')
+            else:
+                QMessageBox.warning(self, "Error", f"Unsupported format: {ext}")
+                return
+
+            self.parent().statusBar().showMessage(
+                f"Exported {len(export_df)} MMP results to {Path(path).name}", 3000
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", str(e))
 
     def _on_error(self, msg: str):
         self._run_btn.setEnabled(True)
